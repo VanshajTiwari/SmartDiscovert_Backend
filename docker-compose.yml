@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: hingebot_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo:27017/hingebot
+      - ADMIN_API_KEY=admin-dev-secret-key-12345
+      - CORS_ORIGIN=*
+      - REDIS_ENABLED=false
+    depends_on:
+      - mongo
+    networks:
+      - hingebot_network
+
+  mongo:
+    image: mongo:7.0
+    container_name: hingebot_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - hingebot_network
+
+networks:
+  hingebot_network:
+    driver: bridge
+
+volumes:
+  mongo_data:
