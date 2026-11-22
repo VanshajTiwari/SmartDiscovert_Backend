@@ -49,12 +49,35 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 }
 
+// Serverless DB connection middleware (ensures database is ready on Vercel requests)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    initRedis();
+  } catch (err) {
+    console.error('[Middleware DB Connection Error]:', err.message);
+  }
+  next();
+});
+
+// Root welcome & health route
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'HingeBot Backend API is online and running',
+    version: '1.0.0',
+    documentation: '/api/v1',
+    health: '/health'
+  });
+});
+
 // Health check endpoint
 const getHealthStatus = () => ({
   status: 'UP',
   uptime: process.uptime(),
   timestamp: new Date().toISOString(),
   environment: process.env.NODE_ENV || 'development',
+  isServerless: Boolean(process.env.VERCEL),
   connectedDevices: getConnectedDevices()
 });
 
@@ -78,7 +101,7 @@ app.use(errorHandler);
 // Initialize WebSockets
 initSocketHandler(io);
 
-// Start server function
+// Start server function for stateful/standalone environments (Local, Docker, VPS)
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
@@ -96,11 +119,12 @@ const startServer = async () => {
   });
 };
 
-if (process.env.NODE_ENV !== 'test') {
+// Only listen directly when not running in serverless (e.g., Vercel)
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   startServer();
 }
 
-// Graceful shutdown handling
+// Graceful shutdown handling (for standalone process)
 const handleShutdown = async (signal) => {
   console.log(`\n[Process] Received ${signal}. Gracefully shutting down...`);
   server.close(() => {
@@ -116,4 +140,9 @@ const handleShutdown = async (signal) => {
 process.on('SIGINT', () => handleShutdown('SIGINT'));
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 
-module.exports = { app, server, io };
+// Attach server and io to app for compatibility
+app.server = server;
+app.io = io;
+
+// Vercel and serverless builders require default export to be the Express request handler function
+module.exports = app;
