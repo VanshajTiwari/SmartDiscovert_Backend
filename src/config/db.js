@@ -12,20 +12,21 @@ const connectDB = async () => {
     return cachedConnection;
   }
 
-  try {
-    let mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hingebot';
-    
-    // Defensive cleanup: remove accidental duplicate slashes after protocol (e.g. .mongodb.net//dbname)
-    mongoURI = mongoURI.replace(/([^:])\/{2,}/g, '$1/');
+  let mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hingebot';
 
+  // Defensive cleanup: remove accidental duplicate slashes after protocol
+  mongoURI = mongoURI.replace(/([^:])\/{2,}/g, '$1/');
+
+  try {
     cachedConnection = await mongoose.connect(mongoURI, {
-      autoIndex: true,
+      autoIndex: false, // Avoid blocking cold starts with background index creation
       serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      socketTimeoutMS: 30000,
+      maxPoolSize: 10,
     });
 
-    console.log(`[MongoDB] Connected successfully: ${cachedConnection.connection.host}/${cachedConnection.connection.name}`);
-    
+    console.log(`[MongoDB] Connected successfully to database: ${cachedConnection.connection.name}`);
+
     mongoose.connection.on('error', (err) => {
       console.error(`[MongoDB] Connection error: ${err.message}`);
     });
