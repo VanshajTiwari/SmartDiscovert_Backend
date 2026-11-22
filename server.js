@@ -49,19 +49,11 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 }
 
-// Serverless DB connection middleware (ensures database is ready on Vercel requests)
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    initRedis();
-  } catch (err) {
-    console.error('[Middleware DB Connection Error]:', err.message);
-  }
-  next();
-});
+// Favicon handlers (instant 204 response)
+app.get(['/favicon.ico', '/favicon.png'], (req, res) => res.status(204).end());
 
-// Root welcome & health route
-app.get('/', (req, res) => {
+// Root welcome route
+app.get(['/', '/api'], (req, res) => {
   res.status(200).json({
     success: true,
     message: 'HingeBot Backend API is online and running',
@@ -72,27 +64,42 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint
-const getHealthStatus = () => ({
-  status: 'UP',
-  uptime: process.uptime(),
-  timestamp: new Date().toISOString(),
-  environment: process.env.NODE_ENV || 'development',
-  isServerless: Boolean(process.env.VERCEL),
-  connectedDevices: getConnectedDevices()
+const getHealthStatus = () => {
+  const mongoose = require('mongoose');
+  const dbStatusMap = { 0: 'DISCONNECTED', 1: 'CONNECTED', 2: 'CONNECTING', 3: 'DISCONNECTING' };
+  return {
+    status: 'UP',
+    database: dbStatusMap[mongoose.connection.readyState] || 'UNKNOWN',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    isServerless: Boolean(process.env.VERCEL),
+    connectedDevices: getConnectedDevices()
+  };
+};
+
+app.get(['/health', '/api/health', '/api/v1/health', '/v1/health'], (req, res) => res.status(200).json(getHealthStatus()));
+
+// Lazy DB Connection Middleware for all API calls
+app.use(['/api', '/v1'], async (req, res, next) => {
+  try {
+    await connectDB();
+    initRedis();
+  } catch (err) {
+    console.error('[API Middleware DB Error]:', err.message);
+  }
+  next();
 });
 
-app.get('/health', (req, res) => res.status(200).json(getHealthStatus()));
-app.get('/api/v1/health', (req, res) => res.status(200).json(getHealthStatus()));
-
-// Mount API routes
-app.use('/api/v1/devices', deviceRoutes);
-app.use('/api/v1/config', configRoutes);
-app.use('/api/v1/sessions', sessionRoutes);
-app.use('/api/v1/commands', commandRoutes);
-app.use('/api/v1/analytics', analyticsRoutes);
+// Mount API routes with both /api/v1 and /v1 prefixes for universal compatibility
+app.use(['/api/v1/devices', '/v1/devices'], deviceRoutes);
+app.use(['/api/v1/config', '/v1/config'], configRoutes);
+app.use(['/api/v1/sessions', '/v1/sessions'], sessionRoutes);
+app.use(['/api/v1/commands', '/v1/commands'], commandRoutes);
+app.use(['/api/v1/analytics', '/v1/analytics'], analyticsRoutes);
 
 // Dedicated route matching Section 4 specification: POST /api/v1/events/batch
-app.post('/api/v1/events/batch', requireDeviceOrAdminAuth, sessionController.recordBatchEvents);
+app.post(['/api/v1/events/batch', '/v1/events/batch'], requireDeviceOrAdminAuth, sessionController.recordBatchEvents);
 
 // Error handling middleware
 app.use(notFoundHandler);
@@ -144,5 +151,5 @@ process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 app.server = server;
 app.io = io;
 
-// Vercel and serverless builders require default export to be the Express request handler function
+// Export app as default for Vercel serverless runtime
 module.exports = app;
