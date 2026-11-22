@@ -27,6 +27,14 @@ const connectDB = async () => {
 
     console.log(`[MongoDB] Connected successfully to database: ${cachedConnection.connection.name}`);
 
+    // Seed default super admin user on initial DB connection
+    try {
+      const { seedAdminUser } = require('../controllers/userController');
+      await seedAdminUser();
+    } catch (seedErr) {
+      console.warn(`[MongoDB] Admin seed check: ${seedErr.message}`);
+    }
+
     mongoose.connection.on('error', (err) => {
       console.error(`[MongoDB] Connection error: ${err.message}`);
     });

@@ -14,6 +14,12 @@ const deviceSchema = new mongoose.Schema({
     ref: 'User',
     index: true
   },
+  ownerUsername: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    index: true
+  },
   name: { 
     type: String, 
     default: 'Android Device',

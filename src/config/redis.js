@@ -1,7 +1,9 @@
 let redisClient = null;
+let connectionAttempted = false;
 
 const initRedis = () => {
-  if (process.env.REDIS_ENABLED === 'true') {
+  if (process.env.REDIS_ENABLED === 'true' && !connectionAttempted) {
+    connectionAttempted = true;
     try {
       const Redis = require('ioredis');
 
@@ -13,23 +15,20 @@ const initRedis = () => {
         connectionUrl = connectionUrl.replace(/^redis:\/\//, 'rediss://');
       }
 
+      const isServerless = Boolean(process.env.VERCEL);
+
       let redisOptions = {
         lazyConnect: true,
-        maxRetriesPerRequest: 2,
-        connectTimeout: 10000,
-        retryStrategy(times) {
-          if (times > 3) return null; // stop retrying after 3 failed attempts
-          return Math.min(times * 500, 2000);
-        }
+        maxRetriesPerRequest: isServerless ? 0 : 1,
+        connectTimeout: isServerless ? 2500 : 5000,
+        enableOfflineQueue: false,
+        retryStrategy: () => null // Prevent infinite reconnection loops in serverless lambdas
       };
 
       if (connectionUrl) {
-        // If TLS protocol is detected or connecting to Upstash, configure TLS options
         const isTLS = connectionUrl.startsWith('rediss://') || connectionUrl.includes('upstash.io');
         if (isTLS) {
-          redisOptions.tls = {
-            rejectUnauthorized: false
-          };
+          redisOptions.tls = { rejectUnauthorized: false };
         }
         redisClient = new Redis(connectionUrl, redisOptions);
       } else {
@@ -54,35 +53,28 @@ const initRedis = () => {
       redisClient.connect().then(() => {
         console.log('[Redis] Connected successfully to Upstash / Redis instance.');
       }).catch((err) => {
-        console.warn(`[Redis] Connection failed: ${err.message}. Falling back to in-memory mode.`);
+        // In serverless, gracefully drop to in-memory mode without blocking
         redisClient = null;
       });
 
-      redisClient.on('error', (err) => {
-        console.warn(`[Redis] Runtime warning: ${err.message}`);
+      redisClient.on('error', () => {
+        redisClient = null;
       });
     } catch (err) {
-      console.warn(`[Redis] Module error: ${err.message}. Running in direct DB mode.`);
       redisClient = null;
     }
-  } else {
-    console.log('[Redis] Disabled via REDIS_ENABLED=false. Running in direct DB mode.');
   }
 };
 
 const getRedisClient = () => redisClient;
 
-/**
- * Cache helper functions with graceful fallback if Redis is unavailable
- */
 const setCache = async (key, value, expireSeconds = 300) => {
   if (!redisClient) return false;
   try {
     const stringVal = typeof value === 'object' ? JSON.stringify(value) : String(value);
     await redisClient.set(key, stringVal, 'EX', expireSeconds);
     return true;
-  } catch (err) {
-    console.warn(`[Redis] setCache failed for key ${key}: ${err.message}`);
+  } catch {
     return false;
   }
 };
@@ -97,8 +89,7 @@ const getCache = async (key) => {
     } catch {
       return data;
     }
-  } catch (err) {
-    console.warn(`[Redis] getCache failed for key ${key}: ${err.message}`);
+  } catch {
     return null;
   }
 };
@@ -108,8 +99,7 @@ const delCache = async (key) => {
   try {
     await redisClient.del(key);
     return true;
-  } catch (err) {
-    console.warn(`[Redis] delCache failed for key ${key}: ${err.message}`);
+  } catch {
     return false;
   }
 };

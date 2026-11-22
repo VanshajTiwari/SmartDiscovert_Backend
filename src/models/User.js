@@ -2,12 +2,13 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
-  email: {
+  username: {
     type: String,
-    required: [true, 'Email is required'],
+    required: [true, 'Username is required'],
     unique: true,
     lowercase: true,
     trim: true,
+    minlength: [3, 'Username must be at least 3 characters'],
     index: true
   },
   passwordHash: {
@@ -18,15 +19,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  name: {
-    type: String,
-    trim: true,
-    default: 'Bot Operator'
-  },
   role: {
     type: String,
     enum: ['user', 'admin'],
-    default: 'user'
+    default: 'user',
+    index: true
   },
   apiKey: {
     type: String,

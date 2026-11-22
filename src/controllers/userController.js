@@ -2,33 +2,79 @@ const User = require('../models/User');
 const Device = require('../models/Device');
 
 /**
- * Register a new User account
+ * Seed or ensure default Super Admin exists in database
+ */
+const seedAdminUser = async () => {
+  try {
+    const adminUsername = (process.env.ADMIN_USERNAME || 'admin').toLowerCase().trim();
+    const adminPassword = process.env.ADMIN_PASSWORD || 'HingeBotAdmin_Secret2026!';
+    const adminKey = process.env.ADMIN_API_KEY || 'hb_admin_secret_99f2b8a071c3';
+
+    let admin = await User.findOne({ username: adminUsername });
+
+    if (!admin) {
+      admin = new User({
+        username: adminUsername,
+        role: 'admin',
+        apiKey: adminKey
+      });
+      admin.setPassword(adminPassword);
+      await admin.save();
+      console.log(`[Admin] Initialized Super Admin user: '${adminUsername}'`);
+    } else if (admin.role !== 'admin') {
+      admin.role = 'admin';
+      await admin.save();
+    }
+    return admin;
+  } catch (err) {
+    console.warn(`[Admin] Seed admin warning: ${err.message}`);
+    return null;
+  }
+};
+
+/**
+ * Register a new User account with username and password
  * POST /api/v1/users/register
  */
 const registerUser = async (req, res, next) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { username, password } = req.body;
 
-    if (!email || !password) {
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Both username and password are required'
       });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const cleanUsername = String(username).toLowerCase().trim();
+
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username must be at least 3 characters long'
+      });
+    }
+
+    if (String(password).length < 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 4 characters long'
+      });
+    }
+
+    const existingUser = await User.findOne({ username: cleanUsername });
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        error: 'A user with this email already exists'
+        error: `Username '${cleanUsername}' is already taken`
       });
     }
 
     const apiKey = User.generateApiKey();
     const user = new User({
-      email: email.toLowerCase(),
-      name: name || 'Bot Operator',
-      role: role === 'admin' ? 'admin' : 'user',
+      username: cleanUsername,
+      role: 'user',
       apiKey
     });
 
@@ -40,8 +86,7 @@ const registerUser = async (req, res, next) => {
       message: 'User registered successfully',
       data: {
         userId: user._id,
-        email: user.email,
-        name: user.name,
+        username: user.username,
         role: user.role,
         apiKey: user.apiKey
       }
@@ -52,25 +97,27 @@ const registerUser = async (req, res, next) => {
 };
 
 /**
- * Log in with email and password
+ * Log in with username and password
  * POST /api/v1/users/login
  */
 const loginUser = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { username, password } = req.body;
 
-    if (!email || !password) {
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Both username and password are required'
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const cleanUsername = String(username).toLowerCase().trim();
+    const user = await User.findOne({ username: cleanUsername });
+
     if (!user || !user.validatePassword(password)) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid username or password'
       });
     }
 
@@ -79,10 +126,10 @@ const loginUser = async (req, res, next) => {
       message: 'Login successful',
       data: {
         userId: user._id,
-        email: user.email,
-        name: user.name,
+        username: user.username,
         role: user.role,
-        apiKey: user.apiKey
+        apiKey: user.apiKey,
+        token: user.apiKey
       }
     });
   } catch (error) {
@@ -108,7 +155,7 @@ const getProfile = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ apiKey }).populate('devices');
+    const user = await User.findOne({ apiKey });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -116,14 +163,15 @@ const getProfile = async (req, res, next) => {
       });
     }
 
-    const devices = await Device.find({ userId: user._id });
+    const devices = await Device.find({ 
+      $or: [{ userId: user._id }, { ownerUsername: user.username }] 
+    });
 
     res.status(200).json({
       success: true,
       data: {
         userId: user._id,
-        email: user.email,
-        name: user.name,
+        username: user.username,
         role: user.role,
         apiKey: user.apiKey,
         devices
@@ -135,34 +183,37 @@ const getProfile = async (req, res, next) => {
 };
 
 /**
- * Link a device to the user account
+ * Claim/link a device to the user account
  * POST /api/v1/users/claim-device
  */
 const claimDevice = async (req, res, next) => {
   try {
     const apiKey = req.headers['x-api-key'] || req.headers['x-user-key'];
-    const { deviceId } = req.body;
+    const { deviceId, username } = req.body;
 
-    if (!apiKey) {
-      return res.status(401).json({ success: false, error: 'User API key required in x-api-key header' });
-    }
     if (!deviceId) {
       return res.status(400).json({ success: false, error: 'deviceId is required' });
     }
 
-    const user = await User.findOne({ apiKey });
+    let user = null;
+    if (apiKey) {
+      user = await User.findOne({ apiKey });
+    } else if (username) {
+      user = await User.findOne({ username: String(username).toLowerCase().trim() });
+    }
+
     if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
+      return res.status(404).json({ success: false, error: 'User not found. Provide valid x-api-key or username.' });
     }
 
     const device = await Device.findOneAndUpdate(
       { deviceId },
-      { userId: user._id },
+      { userId: user._id, ownerUsername: user.username },
       { new: true }
     );
 
     if (!device) {
-      return res.status(404).json({ success: false, error: 'Device not found with that deviceId' });
+      return res.status(404).json({ success: false, error: `Device not found with deviceId: ${deviceId}` });
     }
 
     if (!user.devices.includes(device._id)) {
@@ -172,8 +223,8 @@ const claimDevice = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: `Device ${deviceId} linked to account ${user.email}`,
-      data: { user: user.email, device }
+      message: `Device ${deviceId} linked to user ${user.username}`,
+      data: { username: user.username, device }
     });
   } catch (error) {
     next(error);
@@ -181,6 +232,7 @@ const claimDevice = async (req, res, next) => {
 };
 
 module.exports = {
+  seedAdminUser,
   registerUser,
   loginUser,
   getProfile,
