@@ -6,15 +6,13 @@ const sessionService = require('../services/sessionService');
  */
 const startSession = async (req, res, next) => {
   try {
-    const deviceId = req.body.deviceId || req.deviceId;
-    const { sessionId } = req.body;
+    const deviceId = req.body?.deviceId 
+      || req.body?.device_id 
+      || req.deviceId 
+      || req.device?.deviceId 
+      || 'android_device_bot';
 
-    if (!deviceId) {
-      return res.status(400).json({
-        success: false,
-        error: 'deviceId is required either in body or via device authentication'
-      });
-    }
+    const sessionId = req.body?.sessionId || req.body?.session_id;
 
     const session = await sessionService.startSession({ sessionId, deviceId });
 
@@ -34,15 +32,21 @@ const startSession = async (req, res, next) => {
  */
 const heartbeat = async (req, res, next) => {
   try {
-    const deviceId = req.body.deviceId || req.deviceId;
-    const { sessionId, state, rightCount, leftCount, totalCount, durationSeconds } = req.body;
+    const deviceId = req.body?.deviceId 
+      || req.body?.device_id 
+      || req.deviceId 
+      || req.device?.deviceId 
+      || 'android_device_bot';
 
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: 'sessionId is required for heartbeat'
-      });
-    }
+    const sessionId = req.body?.sessionId 
+      || req.body?.session_id 
+      || `sess_${deviceId}`;
+
+    const state = req.body?.state || req.body?.sessionState || 'RUNNING';
+    const rightCount = Number(req.body?.rightCount ?? req.body?.right_count ?? 0);
+    const leftCount = Number(req.body?.leftCount ?? req.body?.left_count ?? 0);
+    const totalCount = Number(req.body?.totalCount ?? req.body?.total_count ?? (rightCount + leftCount));
+    const durationSeconds = Number(req.body?.durationSeconds ?? req.body?.duration_seconds ?? req.body?.duration ?? 0);
 
     const session = await sessionService.processHeartbeat({
       sessionId,
@@ -69,21 +73,24 @@ const heartbeat = async (req, res, next) => {
  */
 const stopSession = async (req, res, next) => {
   try {
-    const deviceId = req.body.deviceId || req.deviceId;
-    const { sessionId, stopReason, durationSeconds } = req.body;
+    const deviceId = req.body?.deviceId 
+      || req.body?.device_id 
+      || req.deviceId 
+      || req.device?.deviceId 
+      || 'android_device_bot';
 
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: 'sessionId is required to stop session'
-      });
-    }
+    const sessionId = req.body?.sessionId 
+      || req.body?.session_id 
+      || `sess_${deviceId}`;
+
+    const stopReason = req.body?.stopReason || req.body?.stop_reason || 'COMPLETED';
+    const durationSeconds = req.body?.durationSeconds ?? req.body?.duration_seconds ?? req.body?.duration;
 
     const session = await sessionService.stopSession({
       sessionId,
       deviceId,
       stopReason,
-      durationSeconds
+      durationSeconds: durationSeconds !== undefined ? Number(durationSeconds) : undefined
     });
 
     res.status(200).json({
@@ -102,13 +109,22 @@ const stopSession = async (req, res, next) => {
  */
 const recordBatchEvents = async (req, res, next) => {
   try {
-    const deviceId = req.body.deviceId || req.deviceId;
-    const { sessionId, events } = req.body;
+    const deviceId = req.body?.deviceId 
+      || req.body?.device_id 
+      || req.deviceId 
+      || req.device?.deviceId 
+      || 'android_device_bot';
 
-    if (!sessionId || !Array.isArray(events)) {
+    const sessionId = req.body?.sessionId 
+      || req.body?.session_id 
+      || `sess_${deviceId}`;
+
+    const events = req.body?.events || req.body?.eventList || [];
+
+    if (!Array.isArray(events)) {
       return res.status(400).json({
         success: false,
-        error: 'sessionId and an array of events are required'
+        error: 'events must be an array'
       });
     }
 

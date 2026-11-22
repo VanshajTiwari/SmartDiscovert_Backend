@@ -17,6 +17,7 @@ const configRoutes = require('./src/routes/configRoutes');
 const sessionRoutes = require('./src/routes/sessionRoutes');
 const commandRoutes = require('./src/routes/commandRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
+const userRoutes = require('./src/routes/userRoutes');
 const sessionController = require('./src/controllers/sessionController');
 const { requireDeviceOrAdminAuth } = require('./src/middlewares/authMiddleware');
 
@@ -36,7 +37,7 @@ const io = new Server(server, {
 
 // Middleware stack
 app.use(helmet({
-  contentSecurityPolicy: false // Allow dashboard embedding if needed
+  contentSecurityPolicy: false
 }));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
@@ -92,6 +93,7 @@ app.use(['/api', '/v1'], async (req, res, next) => {
 });
 
 // Mount API routes with both /api/v1 and /v1 prefixes for universal compatibility
+app.use(['/api/v1/users', '/v1/users'], userRoutes);
 app.use(['/api/v1/devices', '/v1/devices'], deviceRoutes);
 app.use(['/api/v1/config', '/v1/config'], configRoutes);
 app.use(['/api/v1/sessions', '/v1/sessions'], sessionRoutes);

@@ -9,6 +9,11 @@ const deviceSchema = new mongoose.Schema({
     index: true,
     trim: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
   name: { 
     type: String, 
     default: 'Android Device',

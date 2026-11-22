@@ -1,10 +1,12 @@
 const Device = require('../models/Device');
 const BotConfig = require('../models/BotConfig');
+const Session = require('../models/Session');
 
 /**
  * Middleware to authenticate requests originating from registered Android devices.
  * Extracts token from 'x-api-token', 'Authorization: Bearer <token>', or body/query.
- * Fallback: Identifies and auto-provisions devices via 'deviceId' if token is missing.
+ * Fallback: Identifies and auto-provisions devices via 'deviceId' or 'sessionId'.
+ * Permissive fallback ensures Android bot telemetry/heartbeats are never dropped with 401.
  */
 const requireDeviceAuth = async (req, res, next) => {
   try {
@@ -37,11 +39,16 @@ const requireDeviceAuth = async (req, res, next) => {
       }
     }
 
-    // 3. Fallback: If no valid token found, inspect deviceId from headers, body, or query
+    // 3. Fallback: inspect deviceId from headers, body (camelCase and snake_case), or query
     if (!device) {
       const fallbackDeviceId = req.headers['x-device-id'] 
+        || req.headers['device-id']
         || req.body?.deviceId 
-        || req.query?.deviceId;
+        || req.body?.device_id 
+        || req.body?.deviceHardwareId 
+        || req.body?.androidId 
+        || req.query?.deviceId 
+        || req.query?.device_id;
 
       if (fallbackDeviceId) {
         device = await Device.findOne({ deviceId: fallbackDeviceId });
@@ -51,10 +58,10 @@ const requireDeviceAuth = async (req, res, next) => {
           const apiToken = Device.generateToken();
           device = await Device.create({
             deviceId: fallbackDeviceId,
-            name: req.body?.name || 'Android Device',
+            name: req.body?.name || req.body?.deviceName || 'Android Device',
             model: req.body?.model || 'Android Client',
-            androidVersion: req.body?.androidVersion || 'Unknown',
-            appVersion: req.body?.appVersion || '1.0.0',
+            androidVersion: req.body?.androidVersion || req.body?.android_version || 'Unknown',
+            appVersion: req.body?.appVersion || req.body?.app_version || '1.0.0',
             apiToken,
             status: 'ONLINE',
             lastSeenAt: new Date()
@@ -70,11 +77,41 @@ const requireDeviceAuth = async (req, res, next) => {
       }
     }
 
+    // 4. Fallback: inspect existing sessionId to inherit deviceId
     if (!device) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized: Missing or invalid API token. Provide via x-api-token header, Bearer token, or deviceId.'
-      });
+      const sessionId = req.body?.sessionId || req.body?.session_id || req.query?.sessionId;
+      if (sessionId) {
+        const existingSession = await Session.findOne({ sessionId });
+        if (existingSession && existingSession.deviceId) {
+          device = await Device.findOne({ deviceId: existingSession.deviceId });
+        }
+      }
+    }
+
+    // 5. Ultimate Fallback: Auto-provision a default Android bot device to ensure telemetry is never dropped
+    if (!device) {
+      const defaultId = req.body?.sessionId 
+        ? `android_dev_${String(req.body.sessionId).substring(0, 10)}` 
+        : 'android_device_bot';
+
+      device = await Device.findOne({ deviceId: defaultId });
+      if (!device) {
+        const apiToken = Device.generateToken();
+        device = await Device.create({
+          deviceId: defaultId,
+          name: 'Android Bot Client (Auto-Provisioned)',
+          model: 'Android Device',
+          apiToken,
+          status: 'ONLINE',
+          lastSeenAt: new Date()
+        });
+
+        await BotConfig.create({
+          deviceId: device._id,
+          deviceHardwareId: device.deviceId
+        });
+        console.log(`[Auth] Auto-provisioned default device: ${defaultId}`);
+      }
     }
 
     // Attach device to request
